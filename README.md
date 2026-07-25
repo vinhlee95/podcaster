@@ -112,7 +112,21 @@ lib/
 ```
 
 Connectors are injected into the pipeline, so it can be exercised with fakes and no
-network — the arrangement stonkie uses in `services/recap_audio.py`.
+network — the arrangement stonkie uses in `services/recap_audio.py`, but built from
+functions rather than classes. Each seam is a function type, so a test supplies four
+literals:
+
+```ts
+generateEpisode(options, {
+  extract: async () => article,
+  writeScript: async () => script,
+  synthesize: async () => ({ audio, contentType, durationS }),
+  uploadAudio: async (key) => ({ url, pathname: key }),
+})
+```
+
+Connectors that need configuration (an OpenAI client, a model id) are `createX()`
+factories that close over it; the rest are plain exported functions.
 
 `lib/options.ts` exists so client components can read voice, length, and status
 constants without pulling the OpenAI SDK and Drizzle into the browser bundle.

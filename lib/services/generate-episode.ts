@@ -12,14 +12,14 @@
  */
 
 import {
-  ExtractionError,
-  HttpArticleExtractor,
+  extractArticle,
+  isExtractionError,
   safeParseUrl,
   type ArticleExtractor,
 } from '@/lib/connectors/extract'
-import { countWords, OpenAIScriptWriter, type ScriptWriter } from '@/lib/connectors/script-writer'
-import { OpenAITts, type TtsEngine } from '@/lib/connectors/tts'
-import { audioKey, BlobAudioStorage, type AudioStorage } from '@/lib/connectors/storage'
+import { countWords, createScriptWriter, type ScriptWriter } from '@/lib/connectors/script-writer'
+import { createTts, type TtsEngine } from '@/lib/connectors/tts'
+import { audioKey, uploadAudio, type AudioUploader } from '@/lib/connectors/storage'
 import { createEpisode, updateEpisode } from '@/lib/db/episodes'
 import type { Episode } from '@/lib/db/schema'
 import { DEFAULT_VOICE, EPISODE_STATUS, type GenerationStage, type LengthPreset } from '@/lib/options'
@@ -35,19 +35,31 @@ export type GenerateOptions = {
   length?: LengthPreset
 }
 
+/**
+ * The pipeline's four external dependencies, each a plain function.
+ *
+ * A test supplies literals — `{ extract: async () => article, writeScript: async
+ * () => script, ... }` — with no fake classes to define and no interfaces to
+ * implement.
+ */
 export type Connectors = {
-  extractor: ArticleExtractor
-  scriptWriter: ScriptWriter
-  tts: TtsEngine
-  storage: AudioStorage
+  extract: ArticleExtractor
+  writeScript: ScriptWriter
+  synthesize: TtsEngine
+  uploadAudio: AudioUploader
 }
 
+/**
+ * Production wiring. Called per generation rather than at module load, because
+ * building the OpenAI-backed connectors reads OPENAI_API_KEY and throws when it
+ * is missing — which would take down every route that imports this module.
+ */
 function defaultConnectors(): Connectors {
   return {
-    extractor: new HttpArticleExtractor(),
-    scriptWriter: new OpenAIScriptWriter(),
-    tts: new OpenAITts(),
-    storage: new BlobAudioStorage(),
+    extract: extractArticle,
+    writeScript: createScriptWriter(),
+    synthesize: createTts(),
+    uploadAudio,
   }
 }
 
@@ -62,7 +74,7 @@ export async function* generateEpisode(
   options: GenerateOptions,
   connectors: Connectors = defaultConnectors(),
 ): AsyncGenerator<ProgressEvent> {
-  const { extractor, scriptWriter, tts, storage } = connectors
+  const { extract, writeScript, synthesize, uploadAudio: upload } = connectors
   const voice = options.voice ?? DEFAULT_VOICE
 
   // Validated before the row is written so a bad URL never leaves a failed
@@ -86,7 +98,7 @@ export async function* generateEpisode(
       message: `Reading ${site}…`,
       episodeId: episode.id,
     }
-    const article = await extractor.extract(url)
+    const article = await extract(url)
     await updateEpisode(episode.id, { title: article.title })
 
     yield {
@@ -98,7 +110,7 @@ export async function* generateEpisode(
           : 'Writing the script…',
       episodeId: episode.id,
     }
-    const script = await scriptWriter.write(article, { length: options.length })
+    const script = await writeScript(article, { length: options.length })
     const wordCount = countWords(script.script)
     await updateEpisode(episode.id, {
       title: script.title,
@@ -113,7 +125,7 @@ export async function* generateEpisode(
       message: `Recording ${wordCount} words in ${voice}…`,
       episodeId: episode.id,
     }
-    const synthesis = await tts.synthesize(script.script, { voice })
+    const synthesis = await synthesize(script.script, { voice })
 
     yield {
       type: 'progress',
@@ -121,7 +133,7 @@ export async function* generateEpisode(
       message: 'Saving the audio…',
       episodeId: episode.id,
     }
-    const stored = await storage.upload(
+    const stored = await upload(
       audioKey(episode.id, script.title),
       synthesis.audio,
       synthesis.contentType,
@@ -151,7 +163,7 @@ export async function* generateEpisode(
  * names, request ids, and occasionally key prefixes.
  */
 function toUserMessage(err: unknown): string {
-  if (err instanceof ExtractionError) return err.message
+  if (isExtractionError(err)) return err.message
 
   const raw = err instanceof Error ? err.message : String(err)
 

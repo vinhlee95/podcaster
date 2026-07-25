@@ -11,6 +11,7 @@ import {
 } from '@/lib/options'
 import type { ProgressEvent } from '@/lib/services/generate-episode'
 import type { EpisodeDto } from '@/lib/types'
+import VoicePreview from './VoicePreview'
 
 /** Stage order, used to render the progress trail as steps rather than one message. */
 const STAGES: { key: GenerationStage; label: string }[] = [
@@ -130,13 +131,24 @@ export default function GenerateForm({ onEpisodeCreated, onProgress }: Props) {
             them try pushes the submit button off-screen entirely.
           */}
           <div className="grid grid-cols-1 gap-2 sm:flex sm:items-center">
-            <Select
-              value={voice}
-              onChange={setVoice}
-              disabled={busy}
-              label="Voice"
-              options={VOICES.map((v) => ({ value: v.id, label: `${v.label} · ${v.blurb}` }))}
-            />
+            {/* Picker and its sample button travel together — the button always
+                previews whatever the select currently reads. */}
+            <div className="flex items-center gap-2">
+              <Select
+                value={voice}
+                onChange={setVoice}
+                disabled={busy}
+                label="Voice"
+                className="min-w-0 flex-1 sm:flex-none"
+                options={VOICES.map((v) => ({ value: v.id, label: `${v.label} · ${v.blurb}` }))}
+              />
+              <VoicePreview
+                voice={voice}
+                label={VOICES.find((v) => v.id === voice)?.label ?? voice}
+                disabled={busy}
+                onError={setError}
+              />
+            </div>
             <Select
               value={length}
               onChange={(v) => setLength(v as LengthPreset)}
@@ -218,15 +230,17 @@ function Select({
   options,
   label,
   disabled,
+  className = '',
 }: {
   value: string
   onChange: (value: string) => void
   options: { value: string; label: string }[]
   label: string
   disabled?: boolean
+  className?: string
 }) {
   return (
-    <div className="relative w-full sm:w-auto">
+    <div className={`relative w-full sm:w-auto ${className}`}>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}

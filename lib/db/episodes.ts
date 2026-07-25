@@ -1,5 +1,5 @@
 import { and, desc, eq, lt } from 'drizzle-orm'
-import { getDb } from './index'
+import { getDb, rootCauseMessage } from './index'
 import { EPISODE_STATUS, episodes, type Episode, type NewEpisode } from './schema'
 
 /**
@@ -12,22 +12,35 @@ import { EPISODE_STATUS, episodes, type Episode, type NewEpisode } from './schem
  */
 const STALE_GENERATING_MS = 6 * 60 * 1000
 
-/** Rewrites long-dead `generating` rows to `failed` so the UI stops spinning. */
+/**
+ * Rewrites long-dead `generating` rows to `failed` so the UI stops spinning.
+ *
+ * Best-effort. This is housekeeping the caller did not ask for, and it is the
+ * first statement `listEpisodes` runs — so letting it throw means any transient
+ * write failure takes down the whole library, and the reader never even gets
+ * attempted. Swallow it: the worst case is a dead row spinning one page load
+ * longer. A database that is genuinely unreachable still surfaces, because the
+ * select below fails on its own.
+ */
 async function reapStale(): Promise<void> {
-  const db = getDb()
-  await db
-    .update(episodes)
-    .set({
-      status: EPISODE_STATUS.failed,
-      error: 'Generation was interrupted before it finished.',
-      updatedAt: new Date(),
-    })
-    .where(
-      and(
-        eq(episodes.status, EPISODE_STATUS.generating),
-        lt(episodes.createdAt, new Date(Date.now() - STALE_GENERATING_MS)),
-      ),
-    )
+  try {
+    const db = getDb()
+    await db
+      .update(episodes)
+      .set({
+        status: EPISODE_STATUS.failed,
+        error: 'Generation was interrupted before it finished.',
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(episodes.status, EPISODE_STATUS.generating),
+          lt(episodes.createdAt, new Date(Date.now() - STALE_GENERATING_MS)),
+        ),
+      )
+  } catch (err) {
+    console.warn('episodes.reap_stale_failed', { reason: rootCauseMessage(err) })
+  }
 }
 
 export async function listEpisodes(): Promise<Episode[]> {

@@ -1,4 +1,5 @@
 import { listEpisodes } from '@/lib/db/episodes'
+import { rootCauseMessage } from '@/lib/db'
 import { toDto, type EpisodeDto } from '@/lib/types'
 import Studio from '@/components/Studio'
 import SetupNotice from '@/components/SetupNotice'
@@ -15,7 +16,10 @@ export default async function Home() {
   try {
     episodes = (await listEpisodes()).map(toDto)
   } catch (err) {
-    dbError = err instanceof Error ? err.message : 'Could not reach the database.'
+    // The full chain goes to the server log; the notice only has room for the
+    // reason, which is the innermost message rather than Drizzle's SQL dump.
+    console.error('page.episodes_load_failed', err)
+    dbError = rootCauseMessage(err)
   }
 
   if (dbError) return <SetupNotice message={dbError} />

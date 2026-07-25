@@ -1,0 +1,45 @@
+/**
+ * Constants shared by the server pipeline and the client UI.
+ *
+ * These live apart from the connectors on purpose. The form needs the voice and
+ * length lists, and the episode card needs the status values — importing them
+ * from `connectors/tts.ts` or `db/schema.ts` would pull the OpenAI SDK and
+ * Drizzle into the client bundle for the sake of a few string literals.
+ *
+ * Nothing in this file may import a server-only module.
+ */
+
+export const VOICES = [
+  { id: 'nova', label: 'Nova', blurb: 'Warm, brisk' },
+  { id: 'alloy', label: 'Alloy', blurb: 'Neutral, even' },
+  { id: 'echo', label: 'Echo', blurb: 'Calm, low' },
+  { id: 'fable', label: 'Fable', blurb: 'Expressive, British' },
+  { id: 'onyx', label: 'Onyx', blurb: 'Deep, authoritative' },
+  { id: 'shimmer', label: 'Shimmer', blurb: 'Bright, upbeat' },
+  { id: 'sage', label: 'Sage', blurb: 'Measured, thoughtful' },
+  { id: 'coral', label: 'Coral', blurb: 'Friendly, animated' },
+] as const
+
+export type VoiceId = (typeof VOICES)[number]['id']
+
+export const DEFAULT_VOICE: VoiceId = 'nova'
+
+/** Target episode lengths. Word counts assume ~150 spoken words per minute. */
+export const LENGTH_PRESETS = {
+  quick: { label: 'Quick', minutes: 2, words: 300 },
+  standard: { label: 'Standard', minutes: 5, words: 750 },
+  deep: { label: 'Deep dive', minutes: 10, words: 1500 },
+} as const
+
+export type LengthPreset = keyof typeof LENGTH_PRESETS
+
+export const EPISODE_STATUS = {
+  generating: 'generating',
+  ready: 'ready',
+  failed: 'failed',
+} as const
+
+export type EpisodeStatus = (typeof EPISODE_STATUS)[keyof typeof EPISODE_STATUS]
+
+/** Stages the generation pipeline reports as it advances. */
+export type GenerationStage = 'extracting' | 'writing' | 'synthesizing' | 'uploading' | 'done'

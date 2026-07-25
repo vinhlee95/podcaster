@@ -1,26 +1,143 @@
-@import "tailwindcss";
+@import 'tailwindcss';
 
+/*
+ * Dark-first palette. The app is a listening surface — a bright page behind an
+ * audio player reads as a document, not a player — so dark is the default and
+ * light is the opt-in.
+ */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #0b0b0f;
+  --surface: #14141b;
+  --surface-hover: #1b1b24;
+  --border: #26262f;
+  --foreground: #ededf2;
+  --muted: #9a9aa8;
+  --accent: #8b5cf6;
+  --accent-soft: #a78bfa;
+  --danger: #f87171;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --background: #fafafa;
+    --surface: #ffffff;
+    --surface-hover: #f4f4f6;
+    --border: #e5e5ea;
+    --foreground: #16161a;
+    --muted: #6b6b78;
+    --accent: #7c3aed;
+    --accent-soft: #8b5cf6;
+    --danger: #dc2626;
+  }
 }
 
 @theme inline {
   --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-hover: var(--surface-hover);
+  --color-border: var(--border);
   --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-danger: var(--danger);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+}
+
+/* Range inputs are the scrubber; the default chrome is inconsistent enough
+   across browsers that track and thumb are both styled explicitly. */
+input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+input[type='range']::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--border);
+}
+
+input[type='range']::-moz-range-track {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--border);
+}
+
+input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  margin-top: -4px;
+  height: 12px;
+  width: 12px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  transition: transform 120ms ease;
+}
+
+input[type='range']:hover::-webkit-slider-thumb {
+  transform: scale(1.25);
+}
+
+input[type='range']::-moz-range-thumb {
+  height: 12px;
+  width: 12px;
+  border: none;
+  border-radius: 999px;
+  background: var(--accent-soft);
+}
+
+/*
+ * Controls that appear on hover — but only where hovering exists.
+ *
+ * A touch device fires no hover, so `group-hover:opacity-100` alone leaves these
+ * buttons permanently invisible and untappable on a phone. Gating on
+ * `(hover: hover)` keeps the reveal on pointer devices and makes them
+ * persistently visible everywhere else. A width breakpoint would not do: a
+ * touchscreen laptop is wide *and* hoverless.
+ */
+.hover-reveal {
+  opacity: 1;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .hover-reveal {
+    opacity: 0;
+  }
+
+  .group:hover .hover-reveal,
+  .hover-reveal:focus-within {
+    opacity: 1;
+  }
+}
+
+@keyframes bar-pulse {
+  0%,
+  100% {
+    transform: scaleY(0.35);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+/* Three bars bouncing next to the title of whatever is playing. */
+.equalizer-bar {
+  animation: bar-pulse 900ms ease-in-out infinite;
+  transform-origin: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .equalizer-bar {
+    animation: none;
+    transform: scaleY(0.6);
+  }
 }

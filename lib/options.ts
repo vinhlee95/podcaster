@@ -24,6 +24,21 @@ export type VoiceId = (typeof VOICES)[number]['id']
 
 export const DEFAULT_VOICE: VoiceId = 'nova'
 
+/**
+ * The line every voice reads in a preview.
+ *
+ * Deliberately the same text for all of them — the point is to compare voices,
+ * and that only works if the only variable is the voice. It is generic enough
+ * to carry no article-specific content, and short enough (a few seconds) that
+ * sampling all eight is quick.
+ *
+ * The audio lives in `public/previews/`. Editing this string changes nothing
+ * until `npm run previews` regenerates it.
+ */
+export const VOICE_PREVIEW_TEXT =
+  "Here's how I sound. This is the voice that would read your article to you — " +
+  'the pacing, the tone, the way one sentence settles before the next one starts.'
+
 /** Target episode lengths. Word counts assume ~150 spoken words per minute. */
 export const LENGTH_PRESETS = {
   quick: { label: 'Quick', minutes: 2, words: 300 },

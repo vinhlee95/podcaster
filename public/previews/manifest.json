@@ -1,0 +1,15 @@
+{
+  "model": "gpt-4o-mini-tts",
+  "text": "Here's how I sound. This is the voice that would read your article to you — the pacing, the tone, the way one sentence settles before the next one starts.",
+  "instructions": "You are a warm, engaging podcast host. Speak naturally and conversationally, professional but friendly, with an enthusiastic yet relaxed pace. Let sentences breathe and use natural transitions between ideas.",
+  "voices": [
+    "nova",
+    "alloy",
+    "echo",
+    "fable",
+    "onyx",
+    "shimmer",
+    "sage",
+    "coral"
+  ]
+}

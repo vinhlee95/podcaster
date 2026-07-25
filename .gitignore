@@ -39,4 +39,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
-.claude
+
+# claude — project config (launch.json) is tracked; these are not
+.claude/worktrees/
+.claude/settings.local.json

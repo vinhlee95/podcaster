@@ -2,8 +2,9 @@
  * Text-to-speech connector.
  *
  * All TTS I/O lives here; services inject this connector and never touch the
- * OpenAI SDK directly. The engine is swappable behind `TtsEngine` (ElevenLabs
- * or a local model can be added as sibling classes).
+ * OpenAI SDK directly. The engine is swappable behind `TtsEngine` — an
+ * ElevenLabs or local-model backend is another factory returning the same
+ * function shape.
  *
  * Ported from stonkie's `connectors/tts.py`, with one addition it did not need:
  * chunking. Stonkie synthesizes short market recaps that always fit in a single
@@ -85,25 +86,28 @@ export function chunkScript(text: string, maxChars: number = MAX_CHUNK_CHARS): s
   return chunks.filter(Boolean)
 }
 
-export interface TtsEngine {
-  synthesize(
-    text: string,
-    options?: { voice?: string; onChunk?: (done: number, total: number) => void },
-  ): Promise<SynthesisResult>
+export type SynthesisOptions = {
+  voice?: string
+  onChunk?: (done: number, total: number) => void
 }
 
-export class OpenAITts implements TtsEngine {
-  private client: OpenAI
-  private model: string
+/** The synthesis seam. A test passes any function of this shape. */
+export type TtsEngine = (text: string, options?: SynthesisOptions) => Promise<SynthesisResult>
 
-  constructor(client?: OpenAI, model: string = TTS_MODEL) {
-    this.client = client ?? new OpenAI()
-    this.model = model
-  }
+/**
+ * Builds a TTS engine bound to an OpenAI client and model.
+ *
+ * The per-chunk call is a local function rather than a private method — it is an
+ * implementation detail of this closure and nothing outside can reach it, which
+ * is what `private` was approximating.
+ */
+export function createTts(config: { client?: OpenAI; model?: string } = {}): TtsEngine {
+  const client = config.client ?? new OpenAI()
+  const model = config.model ?? TTS_MODEL
 
-  private async synthesizeChunk(text: string, voice: string): Promise<Buffer> {
-    const response = await this.client.audio.speech.create({
-      model: this.model,
+  async function synthesizeChunk(text: string, voice: string): Promise<Buffer> {
+    const response = await client.audio.speech.create({
+      model,
       voice,
       input: text,
       instructions: VOICE_INSTRUCTIONS,
@@ -112,10 +116,7 @@ export class OpenAITts implements TtsEngine {
     return Buffer.from(await response.arrayBuffer())
   }
 
-  async synthesize(
-    text: string,
-    options: { voice?: string; onChunk?: (done: number, total: number) => void } = {},
-  ): Promise<SynthesisResult> {
+  return async (text, options = {}) => {
     const voice = options.voice ?? DEFAULT_VOICE
     const chunks = chunkScript(text)
     if (chunks.length === 0) throw new Error('Nothing to synthesize — the script was empty.')
@@ -128,7 +129,7 @@ export class OpenAITts implements TtsEngine {
     options.onChunk?.(0, chunks.length)
     const buffers = await Promise.all(
       chunks.map(async (chunk) => {
-        const buffer = await this.synthesizeChunk(chunk, voice)
+        const buffer = await synthesizeChunk(chunk, voice)
         done += 1
         options.onChunk?.(done, chunks.length)
         return buffer

@@ -53,11 +53,21 @@ export type ExtractedArticle = {
   site: string
 }
 
-export class ExtractionError extends Error {
-  constructor(message: string) {
-    super(message)
-    this.name = 'ExtractionError'
-  }
+/**
+ * An error whose message is already written for the user.
+ *
+ * Tagged with a `kind` property rather than being an `Error` subclass, so it can
+ * be recognized with a plain predicate. A tag also survives crossing module or
+ * realm boundaries, which `instanceof` does not.
+ */
+export type ExtractionError = Error & { kind: 'extraction' }
+
+export function extractionError(message: string): ExtractionError {
+  return Object.assign(new Error(message), { name: 'ExtractionError', kind: 'extraction' as const })
+}
+
+export function isExtractionError(err: unknown): err is ExtractionError {
+  return err instanceof Error && (err as Partial<ExtractionError>).kind === 'extraction'
 }
 
 /** Collapses the runs of whitespace that `textContent` leaves between block elements. */
@@ -166,33 +176,37 @@ async function extractViaJina(url: string): Promise<{ title: string; text: strin
   }
 }
 
-export interface ArticleExtractor {
-  extract(url: string): Promise<ExtractedArticle>
-}
+/**
+ * The extraction seam.
+ *
+ * A bare function type rather than an interface with one method: a test
+ * substitutes `async () => ({ title, text, via, site })` and is done, with no
+ * fake object to construct.
+ */
+export type ArticleExtractor = (url: string) => Promise<ExtractedArticle>
 
-export class HttpArticleExtractor implements ArticleExtractor {
-  async extract(url: string): Promise<ExtractedArticle> {
-    const parsed = safeParseUrl(url)
-    const site = parsed.hostname.replace(/^www\./, '')
+/** Extracts an article, trying static parsing first and Jina second. */
+export const extractArticle: ArticleExtractor = async (url) => {
+  const parsed = safeParseUrl(url)
+  const site = parsed.hostname.replace(/^www\./, '')
 
-    const direct = await extractDirect(parsed.toString())
-    if (direct && direct.text.length >= MIN_USABLE_CHARS) {
-      return { title: direct.title || site, text: direct.text, via: 'direct', site }
-    }
-
-    const jina = await extractViaJina(parsed.toString())
-    if (jina && jina.text.length >= MIN_USABLE_CHARS) {
-      return { title: jina.title || direct?.title || site, text: jina.text, via: 'jina', site }
-    }
-
-    // Both paths ran; report the better of the two attempts in the message.
-    const best = Math.max(direct?.text.length ?? 0, jina?.text.length ?? 0)
-    throw new ExtractionError(
-      best === 0
-        ? 'Could not read that page — it may be behind a login, a paywall, or blocking automated requests.'
-        : `That page only yielded ${best} characters of text, which is too short to make an episode from.`,
-    )
+  const direct = await extractDirect(parsed.toString())
+  if (direct && direct.text.length >= MIN_USABLE_CHARS) {
+    return { title: direct.title || site, text: direct.text, via: 'direct', site }
   }
+
+  const jina = await extractViaJina(parsed.toString())
+  if (jina && jina.text.length >= MIN_USABLE_CHARS) {
+    return { title: jina.title || direct?.title || site, text: jina.text, via: 'jina', site }
+  }
+
+  // Both paths ran; report the better of the two attempts in the message.
+  const best = Math.max(direct?.text.length ?? 0, jina?.text.length ?? 0)
+  throw extractionError(
+    best === 0
+      ? 'Could not read that page — it may be behind a login, a paywall, or blocking automated requests.'
+      : `That page only yielded ${best} characters of text, which is too short to make an episode from.`,
+  )
 }
 
 /**
@@ -207,11 +221,11 @@ export function safeParseUrl(input: string): URL {
   try {
     parsed = new URL(input.trim())
   } catch {
-    throw new ExtractionError('That does not look like a valid URL.')
+    throw extractionError('That does not look like a valid URL.')
   }
 
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    throw new ExtractionError('Only http and https URLs are supported.')
+    throw extractionError('Only http and https URLs are supported.')
   }
 
   const host = parsed.hostname.toLowerCase()
@@ -231,7 +245,7 @@ export function safeParseUrl(input: string): URL {
     host.startsWith('[fd')
 
   if (isPrivate) {
-    throw new ExtractionError('That URL points at a private address.')
+    throw extractionError('That URL points at a private address.')
   }
 
   return parsed

@@ -39,7 +39,7 @@ const RESPONSE_SCHEMA = {
   additionalProperties: false,
 } as const
 
-function buildPrompt(article: { title: string; text: string; site: string }, words: number) {
+function buildPrompt(article: { title: string; text: string; site: string }, words: number): string {
   return `Turn the article below into a script for a single host to read aloud.
 
 Rules for the script:
@@ -63,30 +63,33 @@ Article text:
 ${article.text}`
 }
 
-export interface ScriptWriter {
-  write(
-    article: { title: string; text: string; site: string },
-    options?: { length?: LengthPreset },
-  ): Promise<ScriptResult>
-}
+export type ArticleInput = { title: string; text: string; site: string }
 
-export class OpenAIScriptWriter implements ScriptWriter {
-  private client: OpenAI
-  private model: string
+/** The script-writing seam. A test passes any function of this shape. */
+export type ScriptWriter = (
+  article: ArticleInput,
+  options?: { length?: LengthPreset },
+) => Promise<ScriptResult>
 
-  constructor(client?: OpenAI, model: string = SCRIPT_MODEL) {
-    this.client = client ?? new OpenAI()
-    this.model = model
-  }
+/**
+ * Builds a script writer bound to an OpenAI client and model.
+ *
+ * The config lives in the closure instead of on `this`, so the returned value is
+ * just a function — callers depend on the call signature, not on a type that
+ * happens to have a `.write` method.
+ *
+ * `new OpenAI()` reads OPENAI_API_KEY and throws when it is unset, so the client
+ * is created here (at wiring time) rather than at module load.
+ */
+export function createScriptWriter(config: { client?: OpenAI; model?: string } = {}): ScriptWriter {
+  const client = config.client ?? new OpenAI()
+  const model = config.model ?? SCRIPT_MODEL
 
-  async write(
-    article: { title: string; text: string; site: string },
-    options: { length?: LengthPreset } = {},
-  ): Promise<ScriptResult> {
+  return async (article, options = {}) => {
     const preset = LENGTH_PRESETS[options.length ?? 'standard']
 
-    const response = await this.client.chat.completions.create({
-      model: this.model,
+    const response = await client.chat.completions.create({
+      model,
       messages: [{ role: 'user', content: buildPrompt(article, preset.words) }],
       response_format: {
         type: 'json_schema',

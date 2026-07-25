@@ -1,5 +1,5 @@
 import { deleteEpisode, getEpisode } from '@/lib/db/episodes'
-import { BlobAudioStorage } from '@/lib/connectors/storage'
+import { removeAudio } from '@/lib/connectors/storage'
 
 export const runtime = 'nodejs'
 
@@ -31,7 +31,7 @@ export async function DELETE(_request: Request, { params }: Context) {
   // as an error.
   if (episode.audioUrl) {
     try {
-      await new BlobAudioStorage().remove(episode.audioUrl)
+      await removeAudio(episode.audioUrl)
     } catch (err) {
       console.error('episode.blob_delete_failed', { id, err })
     }

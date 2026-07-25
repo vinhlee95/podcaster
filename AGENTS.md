@@ -19,6 +19,13 @@ npm run type-check && npm run build
 
 - **One file per external boundary** in `lib/connectors/`. Services inject connectors
   and never touch an SDK directly — this is what keeps the pipeline testable with fakes.
+- **Functions, not classes.** There are no `class`, `interface`, or `this` declarations
+  anywhere in `app/`, `components/`, or `lib/`, and new code should not add any. A seam
+  is a function *type* (`ArticleExtractor`, `ScriptWriter`, `TtsEngine`, `AudioUploader`);
+  a connector that needs config is a `createX()` factory holding it in a closure; one
+  that needs none is a plain exported function. Fakes are then literals, not classes.
+  Errors carry a `kind` tag with a predicate (`isExtractionError`) instead of subclassing
+  `Error`. The only `new` expressions left are platform built-ins and `new OpenAI()`.
 - **Client components must not import from `lib/connectors/` or `lib/db/`.** Shared
   constants (voices, length presets, episode statuses, stage names) live in
   `lib/options.ts` precisely so the OpenAI SDK and Drizzle stay out of the browser

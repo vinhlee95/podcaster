@@ -42,6 +42,7 @@ export default function EpisodeCard({ episode, onDelete }: Props) {
         title: episode.title,
         duration: episode.durationS ?? 0,
         site: episode.sourceSite,
+        script: episode.script,
       }
     : null
 

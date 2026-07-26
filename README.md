@@ -85,6 +85,56 @@ stops the previous one — "only one plays at a time" needs no coordination betw
 components. Ported from stonkie's `useRecapAudio.ts`, minus the signed-URL expiry
 handling that Vercel Blob's permanent URLs make unnecessary.
 
+### Two modes — `components/FullScreenPlayer.tsx`
+
+Tapping the player bar raises a full-screen view with a **Read** / **Voice** toggle in
+its header. Voice mode is the player: artwork, transport, and the script as lyrics.
+Read mode is the same script as prose with the player taken away — the transport goes
+entirely rather than sitting there greyed out, and the audio pauses, since there would
+be no way to stop it otherwise.
+
+The switch carries the position across, which is the point of having modes rather than
+one view that tries to do both. Read opens at the line the voice reached; Voice starts
+from the line at the top of the screen and plays. So the common trip — read at a desk,
+get up, press play — lands on the sentence you stopped at. Closing the player while
+reading writes the same position, because leaving to go somewhere is exactly the moment
+the feature is for and it is not the button anyone would think to press first.
+
+That position is a single number per episode, held in `localStorage` by
+`lib/player/resume.ts` and applied by `play()` before the first byte is fetched.
+Everything that moves it writes it — playing, scrubbing, the mode switch — so the
+transport, the bar, and the play button on the episode card never disagree about where
+"here" is. It is per-device, though: the laptop you read on does not tell the phone you
+listen on. Moving it server-side is a change to those three functions and nothing else.
+
+### Lyrics — `lib/player/lyrics.ts`
+
+Voice mode scrolls the script against the voice, a sentence lit at a time with its
+words filling as they are spoken. OpenAI TTS
+returns audio and nothing else, so those timings are derived rather than measured:
+pauses are subtracted from the duration at a fixed cost per break, and the speaking
+rate is whatever fits the remaining characters into the time left. The timeline is
+fitted to the real duration, so it cannot drift out the far end.
+
+It does drift in the middle, and the dominant cause is not the model. A long script is
+synthesized as several independent TTS calls, and each call picks its own pace — across
+this project's episodes the same voice reads at 15.7 to 17.5 characters a second, and
+that spread exists *within* an episode too. One global rate cannot follow it, which is
+worth several seconds by the middle of a chunk. Two things absorb that: the lit unit is
+the sentence rather than the clause-length line, so an error of a line or so lands
+inside the sentence already lit, and the highlight is held half a second behind — a
+highlight that trails reads as following the voice, one that leads reads as broken.
+
+Closing the gap properly means recording where the chunks actually fell (their
+durations are known at synthesis time, so the timeline could be pinned at each seam) or
+aligning against a transcription with word timestamps. Neither is in place; the seams
+cannot be recovered afterwards, since OpenAI returns headerless mp3 frames that leave
+no marker at the joins.
+
+The view samples `audio.currentTime` on an animation frame rather than subscribing to
+the store, whose `timeupdate` cadence of ~4 Hz would light a word up to a quarter of a
+second late.
+
 ### Progress — `app/api/generate/route.ts`
 
 Generation takes 30–90 seconds, so the route streams Server-Sent Events and the form
@@ -102,12 +152,15 @@ app/
   page.tsx                      server component, seeds the library
   api/generate/route.ts         SSE generation
   api/episodes/                 list, get, delete
-components/                     Studio, GenerateForm, EpisodeCard, PlayerBar
+components/                     Studio, GenerateForm, EpisodeCard, PlayerBar,
+                                FullScreenPlayer, ReadView
 lib/
   connectors/                   one file per external boundary
   services/generate-episode.ts  pipeline, connectors injected
   db/                           Drizzle schema + queries
   player/store.ts               shared audio element
+  player/lyrics.ts              script -> timed lines
+  player/resume.ts              where each episode was left off
   options.ts                    constants shared by server and client
 ```
 

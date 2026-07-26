@@ -141,3 +141,66 @@ input[type='range']::-moz-range-thumb {
     transform: scaleY(0.6);
   }
 }
+
+/* The full-screen player rises from the bar it was tapped on. */
+@keyframes player-rise {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+.player-rise {
+  animation: player-rise 320ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+/* Two accent washes drifting behind the lyrics, so the backdrop is not flat. */
+@keyframes ambient-drift {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(0, -6%, 0) scale(1.15);
+  }
+}
+
+.ambient-blob {
+  animation: ambient-drift 18s ease-in-out infinite;
+}
+
+/*
+ * The lyric column fades into the chrome at both ends rather than stopping at a
+ * hard edge — a line sliced in half by a straight cut reads as broken layout.
+ * The mask is what makes the fade follow the text as it scrolls; a gradient
+ * overlay could not, since the backdrop behind it is moving too.
+ */
+.lyrics-scroll {
+  /* No scrollbar: the column scrolls itself, and a bar sitting in the mask's
+     fade only advertises that this is a scroll box rather than a stage. */
+  scrollbar-width: none;
+  /* The active line grows and dims as it becomes active, and scroll anchoring
+     would counter-scroll to hold it still — fighting the centring above. */
+  overflow-anchor: none;
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    #000 14%,
+    #000 84%,
+    transparent 100%
+  );
+  mask-image: linear-gradient(to bottom, transparent 0%, #000 14%, #000 84%, transparent 100%);
+}
+
+.lyrics-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .player-rise,
+  .ambient-blob {
+    animation: none;
+  }
+}

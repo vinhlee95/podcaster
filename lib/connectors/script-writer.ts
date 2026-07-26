@@ -136,7 +136,7 @@ ${previousTail}
   const closing =
     index === total - 1
       ? `- End on the last substantive point. NO sign-off, NO "thanks for listening", NO call to action, NO summing up.`
-      : `- More parts follow this one. Stop when you reach the word count, mid-thread if need be. NO concluding sentence, NO summing up, NO teaser for what is next.`
+      : `- More parts follow this one, so do not wrap up: NO concluding sentence, NO summing up, NO teaser for what is next. Stop once you reach the word count and the point you are making is finished — but always finish it. Your final sentence must be complete and end in a full stop.`
 
   return `${opening}\n${closing}`
 }
@@ -214,6 +214,36 @@ function stripContinuationMarker(script: string): string {
   return script.replace(/^\s*(?:\.{3}|…)\s*/, '')
 }
 
+/**
+ * Whether a pass came back as finished prose rather than a fragment.
+ *
+ * A pass that stops mid-sentence is the failure this guards: one returned 83
+ * words ending "complemented by the signature", and because it was the last
+ * pass, that is where the episode ended — a third of the article unread and the
+ * audio stopping mid-word. Nothing else in the pipeline would have caught it,
+ * since the text parses, stores and synthesizes perfectly well.
+ */
+function endsCleanly(script: string): boolean {
+  return /[.!?]["'”’)]?$/.test(script.trim())
+}
+
+/**
+ * Cuts a fragment back to its last complete sentence.
+ *
+ * The last resort after the retries are spent. Losing a half-sentence is a
+ * strictly better outcome than reading one aloud, and returning the fragment
+ * unchanged is not an option — this text goes straight to TTS.
+ */
+function trimToLastSentence(script: string): string {
+  const trimmed = script.trim()
+  const end = Math.max(
+    trimmed.lastIndexOf('.'),
+    trimmed.lastIndexOf('!'),
+    trimmed.lastIndexOf('?'),
+  )
+  return end === -1 ? trimmed : trimmed.slice(0, end + 1)
+}
+
 export type ArticleInput = { title: string; text: string; site: string }
 
 /** The script-writing seam. A test passes any function of this shape. */
@@ -266,15 +296,29 @@ export function createScriptWriter(config: { client?: OpenAI; model?: string } =
     }
   }
 
+  /**
+   * Runs one pass, retrying both a thrown error and a truncated result.
+   *
+   * A pass that stops mid-sentence is not an exception — it parses fine and only
+   * looks wrong when you read it — so retrying on throw alone let those through.
+   * If every attempt comes back truncated, the longest one is trimmed back to
+   * its last complete sentence rather than failing the episode outright.
+   */
   const complete = async (prompt: string, fallbackTitle: string): Promise<ScriptResult> => {
     let lastError: unknown
+    let best: ScriptResult | undefined
+
     for (let n = 0; n < MAX_ATTEMPTS; n++) {
       try {
-        return await attempt(prompt, fallbackTitle)
+        const result = await attempt(prompt, fallbackTitle)
+        if (endsCleanly(result.script)) return result
+        if (!best || result.script.length > best.script.length) best = result
       } catch (err) {
         lastError = err
       }
     }
+
+    if (best) return { ...best, script: trimToLastSentence(best.script) }
     throw lastError
   }
 

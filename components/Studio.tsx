@@ -1,7 +1,7 @@
 'use client'
 
-import { useCallback, useState } from 'react'
-import { Headphones, Loader2 } from 'lucide-react'
+import { useCallback, useEffect, useState } from 'react'
+import { Check, Headphones, Loader2, Rss } from 'lucide-react'
 import { stopIfPlaying } from '@/lib/player/store'
 import type { GenerationStage } from '@/lib/options'
 import type { EpisodeDto } from '@/lib/types'
@@ -16,7 +16,14 @@ import PlayerBar from './PlayerBar'
  * episodes are created and deleted — generation streams the finished row back on
  * its `done` event, so there is nothing a refetch would add.
  */
-export default function Studio({ initialEpisodes }: { initialEpisodes: EpisodeDto[] }) {
+export default function Studio({
+  initialEpisodes,
+  feedPath,
+}: {
+  initialEpisodes: EpisodeDto[]
+  /** Path to the RSS feed, or null when no `FEED_TOKEN` is configured. */
+  feedPath: string | null
+}) {
   const [episodes, setEpisodes] = useState<EpisodeDto[]>(initialEpisodes)
   const [generating, setGenerating] = useState<GenerationStage | null>(null)
 
@@ -59,13 +66,16 @@ export default function Studio({ initialEpisodes }: { initialEpisodes: EpisodeDt
         <GenerateForm onEpisodeCreated={handleCreated} onProgress={setGenerating} />
 
         <section className="mt-10">
-          <div className="mb-3 flex items-baseline justify-between">
+          <div className="mb-3 flex items-baseline justify-between gap-3">
             <h2 className="text-sm font-medium uppercase tracking-wide text-muted">Library</h2>
-            {episodes.length > 0 && (
-              <span className="text-xs text-muted">
-                {episodes.length} episode{episodes.length === 1 ? '' : 's'}
-              </span>
-            )}
+            <div className="flex items-baseline gap-3">
+              {episodes.length > 0 && (
+                <span className="text-xs text-muted">
+                  {episodes.length} episode{episodes.length === 1 ? '' : 's'}
+                </span>
+              )}
+              {feedPath && <SubscribeButton feedPath={feedPath} />}
+            </div>
           </div>
 
           {episodes.length === 0 && !generating ? (
@@ -83,6 +93,56 @@ export default function Studio({ initialEpisodes }: { initialEpisodes: EpisodeDt
 
       <PlayerBar />
     </>
+  )
+}
+
+/**
+ * Copies the absolute feed URL for pasting into a podcast app.
+ *
+ * The URL is only assembled after mount: the server does not know which host the
+ * browser used to reach it, and rendering a guess would mismatch on hydration.
+ *
+ * Not Spotify — its app has no "add by URL". Pocket Casts, Overcast, AntennaPod
+ * and Apple Podcasts all take a raw feed URL.
+ */
+function SubscribeButton({ feedPath }: { feedPath: string }) {
+  const [copied, setCopied] = useState(false)
+
+  useEffect(() => {
+    if (!copied) return
+    const timer = setTimeout(() => setCopied(false), 2000)
+    return () => clearTimeout(timer)
+  }, [copied])
+
+  const copy = useCallback(async () => {
+    // Built here rather than held in state: the server cannot know which host
+    // the browser used, so any value rendered ahead of the click would either
+    // be wrong or have to be reconciled after hydration.
+    const feedUrl = `${window.location.origin}${feedPath}`
+    try {
+      await navigator.clipboard.writeText(feedUrl)
+      setCopied(true)
+    } catch {
+      // Clipboard access needs a secure context and can be denied outright.
+      // Selecting the text by hand is the fallback, so surface it.
+      window.prompt('Copy the feed URL:', feedUrl)
+    }
+  }, [feedPath])
+
+  return (
+    <button
+      type="button"
+      onClick={copy}
+      title="Copy the RSS feed URL for your podcast app"
+      className="inline-flex items-center gap-1.5 rounded-full border border-border px-2.5 py-1 text-xs text-muted transition-colors hover:border-accent/50 hover:text-accent-soft"
+    >
+      {copied ? (
+        <Check size={12} aria-hidden="true" />
+      ) : (
+        <Rss size={12} aria-hidden="true" />
+      )}
+      {copied ? 'Copied' : 'Feed URL'}
+    </button>
   )
 }
 

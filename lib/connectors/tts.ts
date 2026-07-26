@@ -33,8 +33,12 @@ const MAX_CHUNK_CHARS = 3800
  * pulling in an audio-decoding dependency just to read frame headers. It is a
  * seed only: the browser replaces it with the element's real `duration` on
  * `loadedmetadata` (see `lib/player/store.ts`).
+ *
+ * Exported because the RSS feed has to run the conversion backwards for rows
+ * written before `audioBytes` existed, and a second copy of the number would be
+ * free to drift away from this one.
  */
-const MP3_BYTES_PER_SECOND = 128_000 / 8
+export const MP3_BYTES_PER_SECOND = 128_000 / 8
 
 export const VOICE_INSTRUCTIONS =
   'You are a warm, engaging podcast host. Speak naturally and conversationally, ' +

@@ -28,6 +28,16 @@ export const episodes = pgTable(
     audioPathname: text('audio_pathname'),
     /** Exact length in seconds, so the player can lay out before metadata loads. */
     durationS: real('duration_s'),
+    /**
+     * Size of the mp3 in bytes.
+     *
+     * Kept because RSS `<enclosure length>` is measured in bytes, and it cannot be
+     * recovered from `durationS` — that field was derived *from* this one at an
+     * assumed bitrate and rounded to a tenth of a second, so going back the other
+     * way is both circular and lossy. Null on rows written before the feed existed;
+     * `scripts/backfill-audio-bytes.ts` fills those in.
+     */
+    audioBytes: integer('audio_bytes'),
     /** OpenAI voice id used for synthesis. */
     voice: text('voice'),
     /** Words in the script — drives the "~N min read" style hint. */

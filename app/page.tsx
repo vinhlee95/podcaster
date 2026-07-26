@@ -24,5 +24,10 @@ export default async function Home() {
 
   if (dbError) return <SetupNotice message={dbError} />
 
-  return <Studio initialEpisodes={episodes} />
+  // The token is the feed's only credential, and this page is already unguarded —
+  // handing it to the client gives away nothing the visitor could not reach. The
+  // button disappears entirely when the feed is not configured.
+  const token = process.env.FEED_TOKEN?.trim()
+
+  return <Studio initialEpisodes={episodes} feedPath={token ? `/feed/${token}.xml` : null} />
 }

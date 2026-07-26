@@ -156,7 +156,7 @@ export default function GenerateForm({ onEpisodeCreated, onProgress }: Props) {
               label="Length"
               options={Object.entries(LENGTH_PRESETS).map(([key, preset]) => ({
                 value: key,
-                label: `${preset.label} · ~${preset.minutes} min`,
+                label: `${preset.label} · ${preset.hint}`,
               }))}
             />
             <button

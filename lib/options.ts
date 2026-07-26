@@ -39,11 +39,19 @@ export const VOICE_PREVIEW_TEXT =
   "Here's how I sound. This is the voice that would read your article to you — " +
   'the pacing, the tone, the way one sentence settles before the next one starts.'
 
-/** Target episode lengths. Word counts assume ~150 spoken words per minute. */
+/**
+ * Episode lengths.
+ *
+ * `words` is a target and assumes ~150 spoken words per minute; `hint` is what
+ * the menu shows. A `words` of null means no target at all — the article is
+ * carried over in full rather than condensed to fit a duration, so the episode
+ * is as long as the source makes it and no minute count can be promised in
+ * advance. That is the point of the mode: depth is not traded for length.
+ */
 export const LENGTH_PRESETS = {
-  quick: { label: 'Quick', minutes: 2, words: 300 },
-  standard: { label: 'Standard', minutes: 5, words: 750 },
-  deep: { label: 'Deep dive', minutes: 10, words: 1500 },
+  quick: { label: 'Quick', hint: '~2 min', words: 300 },
+  standard: { label: 'Standard', hint: '~5 min', words: 750 },
+  deep: { label: 'Full', hint: 'whole article', words: null },
 } as const
 
 export type LengthPreset = keyof typeof LENGTH_PRESETS

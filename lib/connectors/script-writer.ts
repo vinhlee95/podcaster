@@ -129,13 +129,30 @@ const META_RULES = `Rules for the title and summary:
 - Title: what the episode is about, under 80 characters, no clickbait.
 - Summary: one sentence, under 200 characters, describing what the listener will learn.`
 
-function buildPrompt(article: ArticleInput, words: number): string {
+/**
+ * Coverage rules for the full-length mode, where there is no word target.
+ *
+ * The condensed modes spend most of their instruction budget on what to leave
+ * out. This one says the opposite as plainly as possible, because the model's
+ * default on a long article is to summarize it — that reflex is what produced a
+ * 636-word episode from a 13,000-word guide in the first place.
+ *
+ * It is a transformation, not a rewrite: the length comes from the source, and
+ * asked this way the model tracks it closely (1.00-1.05x across slices from
+ * 1,500 to 13,000 words).
+ */
+const FULL_LENGTH_RULES = `- Do NOT summarize, condense, abridge or skip. Carry the whole article over. Every substantive point, figure, name, date, model designation and measurement in the source must appear in the script, in the article's own order.
+- There is no word limit and no target length. The script should come out about as long as the article itself. Length is not a virtue here and neither is brevity — completeness is. Do not stop early, and do not compress a section because it is long.
+- Leave out only what cannot be spoken: navigation, image and product-embed markup, captions, storefront and cookie text, repeated boilerplate.
+- Add nothing that is not in the source — no opinions, no context, no framing of your own.`
+
+function buildPrompt(article: ArticleInput, words: number | null): string {
   return `Turn the article below into a script for a single host to read aloud.
 
 Rules for the script:
 ${scriptRules()}
 - Attribute the source naturally once, within the first three sentences — for example "${article.site} reports that ...". Do not attribute it again at the end.
-${coverageRules(countWords(article.text), words)}
+${words === null ? FULL_LENGTH_RULES : coverageRules(countWords(article.text), words)}
 
 ${META_RULES}
 
@@ -225,7 +242,12 @@ export function createScriptWriter(config: { client?: OpenAI; model?: string } =
 
   return async (article, options = {}) => {
     const preset = LENGTH_PRESETS[options.length ?? 'standard']
-    const prompt = buildPrompt(article, Math.round(preset.words * TARGET_CALIBRATION))
+    // Calibration corrects a bias in hitting a target; with no target there is
+    // nothing to correct, and the length is whatever the article dictates.
+    const prompt = buildPrompt(
+      article,
+      preset.words === null ? null : Math.round(preset.words * TARGET_CALIBRATION),
+    )
 
     let lastError: unknown
     let best: ScriptResult | undefined

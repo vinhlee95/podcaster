@@ -2,8 +2,8 @@
  * LLM connector that turns extracted article text into a speakable podcast script.
  *
  * Kept separate from `tts.ts` because it is a different upstream call (chat
- * completions, not audio) and will want a different model as quality is tuned.
- * Services inject this; tests pass a fake.
+ * completions, not audio) and a different model — `tts.ts` speaks the text this
+ * one writes. Services inject this; tests pass a fake.
  *
  * Prompt rules follow stonkie's `script_writer.py`: spoken prose only, numbers
  * and abbreviations expanded for the ear, no greeting and no sign-off — a
@@ -17,7 +17,22 @@ import { LENGTH_PRESETS, type LengthPreset } from '@/lib/options'
 // Re-exported so server code can reach them from the connector it already imports.
 export { LENGTH_PRESETS, type LengthPreset } from '@/lib/options'
 
-export const SCRIPT_MODEL = 'gpt-4o-mini'
+/**
+ * The model matters more than the prompt here, and it is worth saying why.
+ *
+ * On `gpt-4o-mini` a whole episode had to be written in several bounded passes
+ * over slices of the article, because that model stops near a thousand words
+ * whatever you ask for — 971 words against a 1,500 target given the full source,
+ * and still only 1,030 given a 1,200-word source, so context was never the
+ * constraint. Stitching passes together met the target but cost three sequential
+ * calls and invented its own failure modes at the seams.
+ *
+ * This model holds a long target in one call: asked for 1,500 words on a
+ * 13,000-word guide it returns ~1,500, faster than the three passes it replaces
+ * and with more specifics per hundred words. Anything that sustains long output
+ * works; drop back to a weaker one and the word targets will quietly go unmet.
+ */
+export const SCRIPT_MODEL = 'gpt-5.4-mini'
 
 /**
  * Source-to-target word ratio above which the article cannot be covered, only
@@ -33,32 +48,27 @@ export const SCRIPT_MODEL = 'gpt-4o-mini'
 const SELECTION_RATIO = 1.6
 
 /**
- * Words to ask for in a single call.
+ * Attempts before the episode fails.
  *
- * The model will not write a long script no matter how the ask is phrased. Given
- * the full 13,000-word guide and a 1,500-word target it returns ~970; given only
- * the first 1,200 words of that source and the same target it still returns
- * ~1,030. Context size is not the constraint — one completion simply tops out
- * near a thousand words. Asked for 400 words on a single section it returns 485.
- *
- * So a long target is met by writing several bounded passes and joining them,
- * not by asking harder. This value sits where the model is accurate rather than
- * where it saturates.
- */
-const SEGMENT_TARGET_WORDS = 500
-
-/** Words of the previous segment shown to the next, so the seam does not restate. */
-const CONTINUITY_TAIL_WORDS = 90
-
-/**
- * Attempts per pass before the episode fails.
- *
- * The model occasionally returns truncated JSON, which `JSON.parse` rejects and
- * which a plain retry fixes. That was survivable when a script was one call; a
- * three-pass script is three chances to hit it, and losing the whole episode to
- * one of them is not.
+ * Covers two transient faults: truncated JSON, which `JSON.parse` rejects, and a
+ * script that stops mid-sentence, which parses fine and only looks wrong when
+ * you read it. Both clear on a retry.
  */
 const MAX_ATTEMPTS = 3
+
+/**
+ * Fraction of the target actually asked for.
+ *
+ * The model runs long by a fairly stable margin — asked for the preset's word
+ * count verbatim it returned 117-136% of it across all three presets, and
+ * rewording the instruction (a range, "hard target", "count as you go") moved
+ * that by a few points at best. Since the presets are really duration promises,
+ * a script 20% over is an episode 20% longer than the menu said, so the ask is
+ * scaled down to land on the promise instead of the arithmetic.
+ *
+ * Recalibrate if `SCRIPT_MODEL` changes; the bias is a property of the model.
+ */
+const TARGET_CALIBRATION = 0.82
 
 export type ScriptResult = {
   /** Episode title — the article's own, tightened for a podcast feed. */
@@ -94,134 +104,55 @@ function coverageRules(sourceWords: number, words: number): string {
 - Aim for about ${words} words. Going somewhat under is fine if the article is thin; do not pad.`
   }
 
-  return `- The article runs about ${sourceWords} words, far more than fits in ${words}. Do not try to summarize all of it. Pick the most substantive through-line and cover it properly, in the article's own order, following it into the specifics: the names, dates, figures, model designations and measurements that make it worth hearing. Skipping whole sections to do this is correct. A shallow survey of everything is the failure case; a detailed account of part of it is the goal.
+  return `- The article runs about ${sourceWords} words, far more than fits in ${words}. Do not try to summarize all of it. Follow the article's own order and go into the specifics: the names, dates, figures, model designations and measurements that make it worth hearing. Skipping whole sections to stay in depth is correct. A shallow survey of everything is the failure case; a detailed account of part of it is the goal.
 - Do not add facts, opinions, or context that is not in the source. Every specific must be traceable to the article text below.
-- Write about ${words} words. The source has far more material than that, so falling short means you stopped early, not that you ran out — go further into the detail you are already covering rather than wrapping up. Do not pad with filler, repetition, or restatement.`
+- Length: no fewer than ${Math.round(words * 0.9)} words and no more than ${Math.round(words * 1.1)}. Count as you go. There is far more material than that, so plan which ground you can cover in the budget and stop taking on new material as you approach it — then finish the point you are on and stop. Do not pad past the ceiling with filler, repetition or restatement.`
 }
 
 /**
- * Rules that hold for every pass.
+ * Rules that hold whatever the source length.
  *
- * The year example is not redundant with the currency and percentage ones: years
- * are by far the most common numeral in an article and the model leaves them as
- * digits unless it is shown one being spoken.
+ * The year and reference-number examples are not redundant with the currency and
+ * percentage ones. Years are the most common numeral in an article and are the
+ * first thing left as digits; catalogue numbers like "7924" are the second, and
+ * TTS reads those as one number rather than a designation.
  */
 function scriptRules(): string {
   return `- Plain spoken prose only. No headings, no markdown, no bullet points, no stage directions, no speaker labels.
-- Expand every abbreviation, symbol and numeral for the ear: "AI" -> "A.I.", "$4.2B" -> "four point two billion dollars", "-2.21%" -> "down two point two one percent", "1926" -> "nineteen twenty-six", "41mm" -> "forty-one millimeters". No digits anywhere in the script.
-- Keep every figure exactly as the article gives it. Never round, never approximate, never invent a number.`
+- Write every number as words, with no digits anywhere in the script — years, measurements, model names and reference numbers included: "AI" -> "A.I.", "$4.2B" -> "four point two billion dollars", "-2.21%" -> "down two point two one percent", "1926" -> "nineteen twenty-six", "41mm" -> "forty-one millimeters", "Reference 7924" -> "Reference seventy-nine twenty-four".
+- Keep every figure exactly as the article gives it. Never round, never approximate, never invent a number.
+- Start immediately with the most interesting thing in the article. NO greeting, NO "welcome back", NO "today we're looking at", NO scene-setting preamble. The first sentence must carry real information.
+- End on the last substantive point, with a complete sentence. NO sign-off, NO "thanks for listening", NO call to action.`
 }
 
 const META_RULES = `Rules for the title and summary:
 - Title: what the episode is about, under 80 characters, no clickbait.
 - Summary: one sentence, under 200 characters, describing what the listener will learn.`
 
-/** Where a segment sits in the finished script — decides how it opens and closes. */
-type SegmentPosition = { index: number; total: number; previousTail?: string }
-
-function positionRules(article: { site: string }, { index, total, previousTail }: SegmentPosition): string {
-  const opening =
-    index === 0
-      ? `- Start immediately with the most interesting thing in the section. NO greeting, NO "welcome back", NO "today we're looking at", NO scene-setting preamble. The first sentence must carry real information.
-- Attribute the source naturally once, within the first three sentences — for example "${article.site} reports that ...". Do not attribute it again.`
-      : `- This continues a script already in progress. Pick up mid-flow: no greeting, no recap of what came before, no "as we saw", no restating the topic. The first sentence must carry new information.
-- Do not attribute the source again; that was already done.
-- The previous part ended with the text quoted below. Continue naturally from where it stops and do not repeat its content. The quote is context only — do not copy it, and do not open with an ellipsis or any other continuation marker. Begin with a complete sentence.
-
-Previous part ended:
-"""
-${previousTail}
-"""`
-
-  const closing =
-    index === total - 1
-      ? `- End on the last substantive point. NO sign-off, NO "thanks for listening", NO call to action, NO summing up.`
-      : `- More parts follow this one, so do not wrap up: NO concluding sentence, NO summing up, NO teaser for what is next. Stop once you reach the word count and the point you are making is finished — but always finish it. Your final sentence must be complete and end in a full stop.`
-
-  return `${opening}\n${closing}`
-}
-
-/**
- * Prompt for one bounded pass over one slice of the article.
- *
- * A single-segment script is just the `index 0 of 1` case, so the one-call path
- * and the segmented path share this and cannot drift apart.
- */
-function buildSegmentPrompt(
-  article: ArticleInput,
-  slice: string,
-  words: number,
-  position: SegmentPosition,
-): string {
-  const { index, total } = position
-  const part = total > 1 ? ` This is part ${index + 1} of ${total}.` : ''
-
-  return `Turn the article section below into a script for a single host to read aloud.${part}
+function buildPrompt(article: ArticleInput, words: number): string {
+  return `Turn the article below into a script for a single host to read aloud.
 
 Rules for the script:
 ${scriptRules()}
-${positionRules(article, position)}
-${coverageRules(countWords(slice), words)}
+- Attribute the source naturally once, within the first three sentences — for example "${article.site} reports that ...". Do not attribute it again at the end.
+${coverageRules(countWords(article.text), words)}
 
 ${META_RULES}
-${total > 1 ? '\nThe title and summary must describe the whole article, not just this section.\n' : ''}
+
 Source: ${article.site}
 Article title: ${article.title}
 
-Article ${total > 1 ? 'section' : 'text'}:
-${slice}`
+Article text:
+${article.text}`
 }
 
 /**
- * Splits the source into one contiguous slice per segment.
+ * Whether the script came back as finished prose rather than a fragment.
  *
- * Contiguous and in order because the prompt asks the model to follow the
- * article's own order — slicing by position is what makes "part 3 of 3" line up
- * with the end of the article rather than covering the same ground again.
- */
-function sliceSource(text: string, segments: number): string[] {
-  if (segments <= 1) return [text]
-
-  const words = text.split(/\s+/).filter(Boolean)
-  const per = Math.ceil(words.length / segments)
-  return Array.from({ length: segments }, (_, i) => words.slice(i * per, (i + 1) * per).join(' '))
-}
-
-/**
- * How many passes a target needs.
- *
- * Capped by what the source can sustain: splitting a thin article into three
- * passes just asks the model to pad three times instead of once.
- */
-function planSegments(targetWords: number, sourceWords: number): number {
-  const wanted = Math.max(1, Math.round(targetWords / SEGMENT_TARGET_WORDS))
-  const affordable = Math.floor(sourceWords / (SEGMENT_TARGET_WORDS * SELECTION_RATIO))
-  return Math.max(1, Math.min(wanted, affordable))
-}
-
-function lastWords(text: string, count: number): string {
-  return text.split(/\s+/).filter(Boolean).slice(-count).join(' ')
-}
-
-/**
- * Drops a leading ellipsis from a continuing segment.
- *
- * The prompt tells the model not to write one, and mostly it does not — but the
- * quoted tail invites it, and a stray "..." is read aloud as a stumble rather
- * than ignored. Cheap to strip, so it is not left to the prompt alone.
- */
-function stripContinuationMarker(script: string): string {
-  return script.replace(/^\s*(?:\.{3}|…)\s*/, '')
-}
-
-/**
- * Whether a pass came back as finished prose rather than a fragment.
- *
- * A pass that stops mid-sentence is the failure this guards: one returned 83
- * words ending "complemented by the signature", and because it was the last
- * pass, that is where the episode ended — a third of the article unread and the
- * audio stopping mid-word. Nothing else in the pipeline would have caught it,
- * since the text parses, stores and synthesizes perfectly well.
+ * A script that stops mid-sentence is the failure this guards: one came back at
+ * 83 words ending "complemented by the signature", and nothing else in the
+ * pipeline would have caught it — the text parses, stores and synthesizes
+ * perfectly well, and only sounds wrong once it is read aloud.
  */
 function endsCleanly(script: string): boolean {
   return /[.!?]["'”’)]?$/.test(script.trim())
@@ -236,11 +167,7 @@ function endsCleanly(script: string): boolean {
  */
 function trimToLastSentence(script: string): string {
   const trimmed = script.trim()
-  const end = Math.max(
-    trimmed.lastIndexOf('.'),
-    trimmed.lastIndexOf('!'),
-    trimmed.lastIndexOf('?'),
-  )
+  const end = Math.max(trimmed.lastIndexOf('.'), trimmed.lastIndexOf('!'), trimmed.lastIndexOf('?'))
   return end === -1 ? trimmed : trimmed.slice(0, end + 1)
 }
 
@@ -296,22 +223,18 @@ export function createScriptWriter(config: { client?: OpenAI; model?: string } =
     }
   }
 
-  /**
-   * Runs one pass, retrying both a thrown error and a truncated result.
-   *
-   * A pass that stops mid-sentence is not an exception — it parses fine and only
-   * looks wrong when you read it — so retrying on throw alone let those through.
-   * If every attempt comes back truncated, the longest one is trimmed back to
-   * its last complete sentence rather than failing the episode outright.
-   */
-  const complete = async (prompt: string, fallbackTitle: string): Promise<ScriptResult> => {
+  return async (article, options = {}) => {
+    const preset = LENGTH_PRESETS[options.length ?? 'standard']
+    const prompt = buildPrompt(article, Math.round(preset.words * TARGET_CALIBRATION))
+
     let lastError: unknown
     let best: ScriptResult | undefined
 
     for (let n = 0; n < MAX_ATTEMPTS; n++) {
       try {
-        const result = await attempt(prompt, fallbackTitle)
+        const result = await attempt(prompt, article.title)
         if (endsCleanly(result.script)) return result
+        // Truncated: keep the fullest one in case every attempt comes back short.
         if (!best || result.script.length > best.script.length) best = result
       } catch (err) {
         lastError = err
@@ -320,40 +243,6 @@ export function createScriptWriter(config: { client?: OpenAI; model?: string } =
 
     if (best) return { ...best, script: trimToLastSentence(best.script) }
     throw lastError
-  }
-
-  return async (article, options = {}) => {
-    const preset = LENGTH_PRESETS[options.length ?? 'standard']
-    const total = planSegments(preset.words, countWords(article.text))
-    const slices = sliceSource(article.text, total)
-    const perSegment = Math.round(preset.words / total)
-
-    // Sequential, not parallel: each pass is shown the tail of the one before so
-    // the seams do not restate or re-open. The added latency is the cost of a
-    // script that reads as one take.
-    const parts: string[] = []
-    let title = article.title
-    let summary = ''
-
-    for (let index = 0; index < total; index++) {
-      const result = await complete(
-        buildSegmentPrompt(article, slices[index], perSegment, {
-          index,
-          total,
-          previousTail: index > 0 ? lastWords(parts[index - 1], CONTINUITY_TAIL_WORDS) : undefined,
-        }),
-        article.title,
-      )
-      // The first pass is the one that saw the article's opening, so its title
-      // and summary are the ones worth keeping.
-      if (index === 0) {
-        title = result.title
-        summary = result.summary
-      }
-      parts.push(index === 0 ? result.script : stripContinuationMarker(result.script))
-    }
-
-    return { title, summary, script: parts.join('\n\n') }
   }
 }
 

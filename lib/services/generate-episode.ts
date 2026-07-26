@@ -143,6 +143,10 @@ export async function* generateEpisode(
       audioUrl: stored.url,
       audioPathname: stored.pathname,
       durationS: synthesis.durationS,
+      // Read off the buffer rather than added to `SynthesisResult`, which would
+      // have changed the `TtsEngine` seam and every fake implementing it for a
+      // number already sitting in hand. The RSS enclosure needs it in bytes.
+      audioBytes: synthesis.audio.length,
       status: EPISODE_STATUS.ready,
       error: null,
     })

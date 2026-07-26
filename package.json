@@ -9,6 +9,9 @@
     "lint": "eslint",
     "type-check": "tsc --noEmit",
     "previews": "tsx scripts/build-previews.ts",
+    "cover": "tsx scripts/build-cover.ts",
+    "backfill:bytes": "tsx scripts/backfill-audio-bytes.ts",
+    "check:feed": "tsx scripts/check-feed.ts",
     "db:push": "drizzle-kit push",
     "db:generate": "drizzle-kit generate",
     "db:studio": "drizzle-kit studio"
@@ -33,6 +36,7 @@
     "drizzle-kit": "^0.31.10",
     "eslint": "^9",
     "eslint-config-next": "16.2.11",
+    "sharp": "^0.34.5",
     "tailwindcss": "^4",
     "tsx": "^4.23.1",
     "typescript": "^5"

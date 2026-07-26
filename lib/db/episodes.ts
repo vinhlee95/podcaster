@@ -1,4 +1,4 @@
-import { and, desc, eq, lt } from 'drizzle-orm'
+import { and, desc, eq, isNotNull, lt } from 'drizzle-orm'
 import { getDb, rootCauseMessage } from './index'
 import { EPISODE_STATUS, episodes, type Episode, type NewEpisode } from './schema'
 
@@ -46,6 +46,34 @@ async function reapStale(): Promise<void> {
 export async function listEpisodes(): Promise<Episode[]> {
   await reapStale()
   return getDb().select().from(episodes).orderBy(desc(episodes.createdAt))
+}
+
+/**
+ * How many episodes the RSS feed carries.
+ *
+ * Feeds are polled forever and grow forever, so the window is capped rather than
+ * left to match the library. Clients keep episodes they have already seen, so
+ * anything falling off the end stays in the subscriber's app.
+ */
+const FEED_LIMIT = 300
+
+/**
+ * Playable episodes, newest first, for the RSS feed.
+ *
+ * Deliberately not `listEpisodes` — that one calls `reapStale`, which *writes*.
+ * Podcast clients poll every few hours forever, and none of them should be
+ * driving an UPDATE. This is a pure read.
+ *
+ * Rows without audio are excluded rather than rendered as empty items: an
+ * `<enclosure>` with no URL is what makes a client show a broken episode.
+ */
+export async function listFeedEpisodes(limit: number = FEED_LIMIT): Promise<Episode[]> {
+  return getDb()
+    .select()
+    .from(episodes)
+    .where(and(eq(episodes.status, EPISODE_STATUS.ready), isNotNull(episodes.audioUrl)))
+    .orderBy(desc(episodes.createdAt))
+    .limit(limit)
 }
 
 export async function getEpisode(id: number): Promise<Episode | null> {

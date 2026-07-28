@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useState } from 'react'
-import { AlertCircle, ChevronUp, Pause, Play, RotateCcw, RotateCw, X } from 'lucide-react'
+import { AlertCircle, ChevronUp, Pause, Play, X } from 'lucide-react'
 import {
   cycleRate,
   formatTime,
@@ -11,8 +11,11 @@ import {
   skip,
   stop,
   usePlayer,
+  SKIP_SECONDS,
 } from '@/lib/player/store'
 import FullScreenPlayer from './FullScreenPlayer'
+import SkipIcon from './SkipIcon'
+import { rangeFill } from './rangeFill'
 
 /**
  * Sticky transport for whatever is playing.
@@ -75,11 +78,11 @@ export default function PlayerBar() {
             </button>
 
             <div className="hidden shrink-0 items-center gap-1 sm:flex">
-              <SkipButton delta={-15} label="Back 15 seconds">
-                <RotateCcw size={16} aria-hidden="true" />
+              <SkipButton delta={-SKIP_SECONDS} label={`Back ${SKIP_SECONDS} seconds`}>
+                <SkipIcon seconds={SKIP_SECONDS} direction="back" size={18} />
               </SkipButton>
-              <SkipButton delta={15} label="Forward 15 seconds">
-                <RotateCw size={16} aria-hidden="true" />
+              <SkipButton delta={SKIP_SECONDS} label={`Forward ${SKIP_SECONDS} seconds`}>
+                <SkipIcon seconds={SKIP_SECONDS} direction="forward" size={18} />
               </SkipButton>
             </div>
 
@@ -145,7 +148,8 @@ export default function PlayerBar() {
               value={Math.min(currentTime, total)}
               onChange={(e) => seek(Number(e.target.value))}
               aria-label="Seek"
-              className="min-w-0 flex-1"
+              className="range-fill min-w-0 flex-1"
+              style={rangeFill(total > 0 ? currentTime / total : 0)}
             />
             <span className="w-10 shrink-0 font-mono text-[11px] tabular-nums text-muted">
               {formatTime(total)}

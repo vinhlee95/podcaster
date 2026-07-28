@@ -8,8 +8,9 @@ import {
   Headphones,
   Pause,
   Play,
-  RotateCcw,
-  RotateCw,
+  Volume1,
+  Volume2,
+  VolumeX,
 } from 'lucide-react'
 import {
   currentTimeNow,
@@ -18,8 +19,10 @@ import {
   pause,
   play,
   seek,
+  setVolume,
   skip,
   usePlayer,
+  SKIP_SECONDS,
   type Track,
 } from '@/lib/player/store'
 import {
@@ -31,6 +34,8 @@ import {
   type SpokenWord,
 } from '@/lib/player/lyrics'
 import ReadView from './ReadView'
+import SkipIcon from './SkipIcon'
+import { rangeFill } from './rangeFill'
 
 /**
  * The now-playing surface, in two modes.
@@ -61,7 +66,7 @@ export default function FullScreenPlayer({
   track: Track
   onClose: () => void
 }) {
-  const { isPlaying, currentTime, duration, rate, errored } = usePlayer()
+  const { isPlaying, currentTime, duration, rate, volume, canSetVolume, errored } = usePlayer()
   const total = duration || track.duration || 0
 
   // Rebuilt when the element reports its real duration, which replaces the
@@ -177,18 +182,6 @@ export default function FullScreenPlayer({
                 : 'Paused'}
         </p>
 
-        {/* Speed belongs to the voice, so it goes with the rest of the transport. */}
-        {mode === 'voice' && (
-          <button
-            type="button"
-            onClick={() => cycleRate()}
-            aria-label="Change playback speed"
-            className="inline-flex h-10 min-w-10 items-center justify-center rounded-full border border-border px-2 font-mono text-xs text-muted transition hover:bg-surface-hover hover:text-foreground"
-          >
-            {rate}x
-          </button>
-        )}
-
         {/* Anchored right in both modes: a toggle that moves when you use it is a
             toggle you have to find again. */}
         {canRead && (
@@ -258,53 +251,70 @@ export default function FullScreenPlayer({
           className="shrink-0 px-5 lg:px-12"
           style={{ paddingBottom: 'max(1.25rem, env(safe-area-inset-bottom))' }}
         >
-        <div className="mx-auto w-full max-w-xl">
-          <input
-            type="range"
-            min={0}
-            max={total || 1}
-            step={0.5}
-            value={Math.min(currentTime, total)}
-            onChange={(event) => seek(Number(event.target.value))}
-            aria-label="Seek"
-            className="w-full"
-          />
-          <div className="mt-1.5 flex justify-between font-mono text-[11px] tabular-nums text-muted">
-            <span>{formatTime(currentTime)}</span>
-            <span>-{formatTime(Math.max(total - currentTime, 0))}</span>
-          </div>
+          <div className="mx-auto w-full max-w-xl">
+            <input
+              type="range"
+              min={0}
+              max={total || 1}
+              step={0.5}
+              value={Math.min(currentTime, total)}
+              onChange={(event) => seek(Number(event.target.value))}
+              aria-label="Seek"
+              className="range-fill w-full"
+              style={rangeFill(total > 0 ? currentTime / total : 0)}
+            />
+            <div className="mt-1.5 flex justify-between font-mono text-[11px] tabular-nums text-muted">
+              <span>{formatTime(currentTime)}</span>
+              <span>-{formatTime(Math.max(total - currentTime, 0))}</span>
+            </div>
 
-          <div className="mt-3 flex items-center justify-center gap-8">
-            <button
-              type="button"
-              onClick={() => skip(-15)}
-              aria-label="Back 15 seconds"
-              className="inline-flex h-12 w-12 items-center justify-center rounded-full text-muted transition hover:bg-surface-hover hover:text-foreground active:scale-95"
-            >
-              <RotateCcw size={22} aria-hidden="true" />
-            </button>
+            <div className="mt-3 flex items-center justify-center gap-8">
+              <button
+                type="button"
+                onClick={() => skip(-SKIP_SECONDS)}
+                aria-label={`Back ${SKIP_SECONDS} seconds`}
+                className="inline-flex h-12 w-12 items-center justify-center rounded-full text-muted transition hover:bg-surface-hover hover:text-foreground active:scale-95"
+              >
+                <SkipIcon seconds={SKIP_SECONDS} direction="back" size={26} />
+              </button>
 
-            <button
-              type="button"
-              onClick={() => (isPlaying ? pause() : void play(track))}
-              aria-label={isPlaying ? 'Pause' : 'Play'}
-              className="inline-flex h-16 w-16 items-center justify-center rounded-full bg-accent text-white shadow-lg shadow-accent/25 transition hover:scale-105 hover:bg-accent-soft active:scale-95"
-            >
-              {isPlaying ? (
-                <Pause size={26} fill="currentColor" aria-hidden="true" />
-              ) : (
-                <Play size={26} fill="currentColor" className="ml-1" aria-hidden="true" />
-              )}
-            </button>
+              <button
+                type="button"
+                onClick={() => (isPlaying ? pause() : void play(track))}
+                aria-label={isPlaying ? 'Pause' : 'Play'}
+                className="inline-flex h-16 w-16 items-center justify-center rounded-full bg-accent text-white shadow-lg shadow-accent/25 transition hover:scale-105 hover:bg-accent-soft active:scale-95"
+              >
+                {isPlaying ? (
+                  <Pause size={26} fill="currentColor" aria-hidden="true" />
+                ) : (
+                  <Play size={26} fill="currentColor" className="ml-1" aria-hidden="true" />
+                )}
+              </button>
 
-            <button
-              type="button"
-              onClick={() => skip(15)}
-              aria-label="Forward 15 seconds"
-              className="inline-flex h-12 w-12 items-center justify-center rounded-full text-muted transition hover:bg-surface-hover hover:text-foreground active:scale-95"
-            >
-              <RotateCw size={22} aria-hidden="true" />
-            </button>
+              <button
+                type="button"
+                onClick={() => skip(SKIP_SECONDS)}
+                aria-label={`Forward ${SKIP_SECONDS} seconds`}
+                className="inline-flex h-12 w-12 items-center justify-center rounded-full text-muted transition hover:bg-surface-hover hover:text-foreground active:scale-95"
+              >
+                <SkipIcon seconds={SKIP_SECONDS} direction="forward" size={26} />
+              </button>
+            </div>
+
+            <Volume volume={volume} canSetVolume={canSetVolume} />
+
+            {/* The bottom row, where Apple keeps the controls that are settings rather
+                than transport: reached deliberately, and out of the way of the thumb
+                that is aiming for play. */}
+            <div className="mt-4 flex items-center justify-center">
+              <button
+                type="button"
+                onClick={() => cycleRate()}
+                aria-label={`Change playback speed, currently ${rate}x`}
+                className="inline-flex h-9 min-w-14 items-center justify-center rounded-full border border-border px-3 font-mono text-xs text-muted transition hover:bg-surface-hover hover:text-foreground active:scale-95"
+              >
+                {rate}x
+              </button>
             </div>
           </div>
         </footer>
@@ -510,6 +520,42 @@ const LyricLines = memo(function LyricLines({
     </div>
   )
 })
+
+/**
+ * The volume row: a slider between a quiet speaker and a loud one.
+ *
+ * The icons are decoration, not controls — the same arrangement Apple Music uses,
+ * where the ends of the slider say which way is which and the slider is the only
+ * thing to hit. The left one does report a silenced player, though, because a
+ * slider dragged to zero and an episode that failed to load look identical
+ * otherwise.
+ *
+ * Absent entirely where the browser will not take a volume: see `canSetVolume`.
+ */
+function Volume({ volume, canSetVolume }: { volume: number; canSetVolume: boolean }) {
+  if (!canSetVolume) return null
+
+  const Quiet = volume === 0 ? VolumeX : Volume1
+
+  return (
+    <div className="mt-5 flex items-center gap-3">
+      <Quiet size={16} className="shrink-0 text-muted" aria-hidden="true" />
+      <input
+        type="range"
+        min={0}
+        max={1}
+        step={0.01}
+        value={volume}
+        onChange={(event) => setVolume(Number(event.target.value))}
+        aria-label="Volume"
+        aria-valuetext={`${Math.round(volume * 100)} percent`}
+        className="range-fill min-w-0 flex-1"
+        style={rangeFill(volume)}
+      />
+      <Volume2 size={16} className="shrink-0 text-muted" aria-hidden="true" />
+    </div>
+  )
+}
 
 /**
  * Artwork.

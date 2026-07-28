@@ -2,6 +2,7 @@
 
 import { useSyncExternalStore } from 'react'
 import { clearPosition, resumePosition, savePosition } from './resume'
+import { loadVolume, saveVolume } from './volume'
 
 /**
  * Single-player store for episode audio.
@@ -43,11 +44,24 @@ export type PlayerState = {
   currentTime: number
   duration: number
   rate: number
+  /** 0–1, applied to the element and remembered across sessions. */
+  volume: number
+  /** False where the element ignores volume writes; see `detectVolumeSupport`. */
+  canSetVolume: boolean
   /** True when the last load failed. */
   errored: boolean
 }
 
 export const PLAYBACK_RATES = [1, 1.25, 1.5, 1.75, 2] as const
+
+/**
+ * How far the skip controls move, in seconds.
+ *
+ * Exported because the buttons now print it on themselves and the lock-screen
+ * handlers below use it too — a number that appears in the UI must not be able to
+ * disagree with the one the button actually applies.
+ */
+export const SKIP_SECONDS = 15
 
 const INITIAL_STATE: PlayerState = {
   trackId: null,
@@ -56,6 +70,8 @@ const INITIAL_STATE: PlayerState = {
   currentTime: 0,
   duration: 0,
   rate: 1,
+  volume: 1,
+  canSetVolume: true,
   errored: false,
 }
 
@@ -102,12 +118,34 @@ function rememberPosition(seconds: number) {
   savePosition(state.trackId, seconds)
 }
 
+/**
+ * Whether this browser lets software set the volume at all.
+ *
+ * iOS gives volume to the hardware buttons and makes `volume` read-only, so the
+ * write below is silently dropped there. A slider that moves nothing is worse than
+ * no slider, so the control is hidden rather than left inert — and the question is
+ * answered by trying it on a throwaway element rather than by sniffing the user
+ * agent, which would go stale the moment the rule changes.
+ */
+function detectVolumeSupport(): boolean {
+  if (typeof Audio === 'undefined') return false
+  const probe = new Audio()
+  probe.volume = 0.5
+  return probe.volume === 0.5
+}
+
 function ensureAudio(): HTMLAudioElement {
   if (audio) return audio
 
   const el = new Audio()
   el.preload = 'none'
   el.playbackRate = state.rate
+
+  // Read here rather than into `INITIAL_STATE`, which is also the server snapshot
+  // and so has to be the same on both sides of hydration.
+  const volume = loadVolume()
+  el.volume = volume
+  setState({ volume, canSetVolume: detectVolumeSupport() })
 
   // Read `paused` rather than inferring from the event name. Swapping `src`
   // mid-playback fires a `pause` *after* the new `play()` has been issued, so
@@ -167,8 +205,8 @@ function applyMediaSession(track: Track) {
   handle('seekto', (details) => {
     if (typeof details.seekTime === 'number') seek(details.seekTime)
   })
-  handle('seekbackward', () => seek(state.currentTime - 15))
-  handle('seekforward', () => seek(state.currentTime + 15))
+  handle('seekbackward', () => skip(-SKIP_SECONDS))
+  handle('seekforward', () => skip(SKIP_SECONDS))
 }
 
 /** Starts `track`, replacing whatever was playing. Re-selecting the loaded track resumes it. */
@@ -246,6 +284,15 @@ export function seek(seconds: number) {
 
 export function skip(delta: number) {
   seek(state.currentTime + delta)
+}
+
+/** Sets the output level, 0–1. Values outside that range are clamped. */
+export function setVolume(volume: number) {
+  const clamped = Math.min(Math.max(volume, 0), 1)
+  if (clamped === state.volume) return
+  if (audio) audio.volume = clamped
+  setState({ volume: clamped })
+  saveVolume(clamped)
 }
 
 export function setRate(rate: number) {

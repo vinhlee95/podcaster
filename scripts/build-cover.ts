@@ -15,13 +15,15 @@
  * the letters are mud, and the glyph alone is what reads.
  */
 
-import { writeFile } from 'node:fs/promises'
+import { mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import sharp from 'sharp'
 import { SHOW_TITLE } from '@/lib/feed/show'
 
 const COVER_OUT = path.join(process.cwd(), 'public', 'cover.png')
 const APP_DIR = path.join(process.cwd(), 'app')
+/** Manifest icons need stable URLs of their own, so they go in `public/`. */
+const PWA_DIR = path.join(process.cwd(), 'public', 'icons')
 
 /**
  * 3000px is Apple's preferred size. The artwork is flat colour plus two smooth
@@ -83,11 +85,25 @@ function coverSvg(title: string): string {
 }
 
 /**
- * Centres the glyph's 512x411 bounding box on the grid and blows it up to ~76%
- * of the frame — tight enough to stay legible at 16px, with margin left for the
- * rounded mask iOS applies to `apple-icon`.
+ * Centres the glyph's 512x411 bounding box on the grid and scales it in place.
  */
-const ICON_FIT = 'translate(500,500) scale(1.48) translate(-500,-442.5)'
+function fit(scale: number): string {
+  return `translate(500,500) scale(${scale}) translate(-500,-442.5)`
+}
+
+/**
+ * ~76% of the frame — tight enough to stay legible at 16px, with margin left
+ * for the rounded mask iOS applies to `apple-icon`.
+ */
+const ICON_SCALE = 1.48
+
+/**
+ * Android masks a `maskable` icon to whatever shape the launcher uses, and only
+ * guarantees the centre circle of 80% diameter survives. The glyph's corners sit
+ * `scale * hypot(256, 205.5)` from the centre, so anything above 1.21 risks
+ * having the cups shaved off; 1.15 leaves a margin.
+ */
+const MASKABLE_SCALE = 1.15
 
 /**
  * Corner radius on the 1000-unit grid, so 20% of the tile — a hair softer than
@@ -99,20 +115,29 @@ const ICON_FIT = 'translate(500,500) scale(1.48) translate(-500,-442.5)'
  */
 const ICON_RADIUS = 200
 
-function iconSvg(size: number, radius: number): string {
+type IconSpec = {
+  /** Absolute path to write to. */
+  out: string
+  size: number
+  /** Corner radius on the 1000-unit grid; 0 for icons something else masks. */
+  radius: number
+  scale: number
+}
+
+function iconSvg({ size, radius, scale }: Omit<IconSpec, 'out'>): string {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 1000 1000">
   ${DEFS}
 
   <rect width="1000" height="1000" rx="${radius}" fill="${BACKGROUND}"/>
   <rect width="1000" height="1000" rx="${radius}" fill="url(#halo)"/>
 
-  ${headphone(ICON_FIT)}
+  ${headphone(fit(scale))}
 </svg>`
 }
 
 /** Rasterized from the SVG at the final size, so the glyph is hinted per size. */
-function iconPng(size: number, radius = ICON_RADIUS): Promise<Buffer> {
-  return sharp(Buffer.from(iconSvg(size, radius))).png({ compressionLevel: 9 }).toBuffer()
+function iconPng(spec: Omit<IconSpec, 'out'>): Promise<Buffer> {
+  return sharp(Buffer.from(iconSvg(spec))).png({ compressionLevel: 9 }).toBuffer()
 }
 
 /**
@@ -174,24 +199,38 @@ async function main() {
     console.warn(`Larger than expected for flat artwork — consider dropping SIZE to 1500.`)
   }
 
-  // Next's file conventions: `icon.png` becomes the `<link rel="icon">` a modern
-  // browser prefers, `apple-icon.png` the iOS home-screen tile at its native
-  // 180px, and `favicon.ico` covers the unconditional `/favicon.ico` request.
-  const icons: [name: string, size: number, radius: number][] = [
-    ['icon.png', 512, ICON_RADIUS],
-    ['apple-icon.png', 180, 0],
+  await mkdir(PWA_DIR, { recursive: true })
+
+  const icons: IconSpec[] = [
+    // Next's file conventions. `icon.png` becomes the `<link rel="icon">` a
+    // modern browser prefers; `apple-icon.png` is the iOS home-screen tile at
+    // its native 180px, left square because iOS applies its own mask.
+    { out: path.join(APP_DIR, 'icon.png'), size: 512, radius: ICON_RADIUS, scale: ICON_SCALE },
+    { out: path.join(APP_DIR, 'apple-icon.png'), size: 180, radius: 0, scale: ICON_SCALE },
+    // Referenced by `app/manifest.ts`. Android wants both a 192 and a 512, plus
+    // a full-bleed `maskable` variant it can cut its own shape out of.
+    { out: path.join(PWA_DIR, 'icon-192.png'), size: 192, radius: ICON_RADIUS, scale: ICON_SCALE },
+    { out: path.join(PWA_DIR, 'icon-512.png'), size: 512, radius: ICON_RADIUS, scale: ICON_SCALE },
+    {
+      out: path.join(PWA_DIR, 'icon-maskable-512.png'),
+      size: 512,
+      radius: 0,
+      scale: MASKABLE_SCALE,
+    },
   ]
 
-  for (const [name, size, radius] of icons) {
-    const png = await iconPng(size, radius)
-    const out = path.join(APP_DIR, name)
+  for (const { out, ...spec } of icons) {
+    const png = await iconPng(spec)
     await writeFile(out, png)
-    report(`${name} ${size}x${size}`, png.length, out)
+    report(`${path.basename(out)} ${spec.size}x${spec.size}`, png.length, out)
   }
 
   const ico = icoContainer(
     await Promise.all(
-      [32, 16].map(async (size) => ({ size, png: await iconPng(size) }))
+      [32, 16].map(async (size) => ({
+        size,
+        png: await iconPng({ size, radius: ICON_RADIUS, scale: ICON_SCALE }),
+      }))
     )
   )
   const icoOut = path.join(APP_DIR, 'favicon.ico')
